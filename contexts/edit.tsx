@@ -9,6 +9,12 @@ import { Block, Tool } from '@gptscript-ai/gptscript';
 import { getScript, Script, updateScript } from '@/actions/me/scripts';
 import { getTexts, parse, stringify } from '@/actions/gptscript';
 import { getModels } from '@/actions/models';
+import { KnowledgeBase } from '@/types/knowledge';
+import {
+  getKnoweledgeBase,
+  getKnowledgeBaseDir,
+} from '@/actions/knowledge/knowledge';
+import path from 'path';
 
 const DEBOUNCE_TIME = 1000; // milliseconds
 const DYNAMIC_INSTRUCTIONS = 'dynamic-instructions';
@@ -49,6 +55,8 @@ interface EditContextState {
   dynamicInstructions: string;
   setDynamicInstructions: React.Dispatch<React.SetStateAction<string>>;
   scriptPath: string;
+  knowledgeIds: string[];
+  setKnowledgeIds: React.Dispatch<React.SetStateAction<string[]>>;
 
   // actions
   update: () => Promise<void>;
@@ -87,6 +95,51 @@ const EditContextProvider: React.FC<EditContextProps> = ({
   // to store requirements.txt and package.json files for the script.
   const [dependencies, setDependencies] = useState<DependencyBlock[]>([]);
 
+  const [knowledgeIds, setKnowledgeIds] = useState<string[]>([]);
+  const [knowledgeTools, setKnowledgeTools] = useState<Tool[]>([]);
+
+  useEffect(() => {
+    const updateKnowledges = async () => {
+      const knowledges = await Promise.all(
+        knowledgeIds.map(async (id) => getKnoweledgeBase(id))
+      );
+      const kTools = await Promise.all(
+        knowledges.map(async (k) => {
+          const knowledgeDir = await getKnowledgeBaseDir(k.id);
+          const tool = {
+            id: k.id,
+            name: k.name,
+            description: k.description,
+            type: 'tool',
+            arguments: {
+              type: 'object',
+              properties: {
+                query: {
+                  type: 'string',
+                  description: 'Query to search in a knowledge base',
+                },
+              },
+            },
+            instructions: `#!knowledge retrieve --dataset ${k.id} --archive ${path.join(knowledgeDir, 'data.tar.gz').replace(/ /g, '\\ ')} --flows-file ${path.join(knowledgeDir, 'config.yaml').replace(/ /g, '\\ ')}  "\${QUERY}"
+          `,
+          } as Tool;
+          return tool;
+        })
+      );
+      setKnowledgeTools(kTools);
+      await update();
+    };
+    updateKnowledges();
+  }, [knowledgeIds]);
+
+  useEffect(() => {
+    knowledgeTools.forEach((tool) => {
+      if (tool.name && !root.tools?.includes(tool.name)) {
+        addRootTool(tool.name);
+      }
+    });
+  }, [knowledgeTools]);
+
   useEffect(() => {
     getModels().then((m) => {
       setModels(m);
@@ -106,10 +159,26 @@ const EditContextProvider: React.FC<EditContextProps> = ({
         setScriptId(script.id!);
 
         // dynamic instructions are stored in a special tool
-        const tools = findTools(parsedScript);
-        setTools(tools);
+        const toolsFromScript = findTools(parsedScript);
+        setTools(
+          toolsFromScript.filter(
+            (t) => !t.instructions?.startsWith('#!knowledge')
+          )
+        );
+        setKnowledgeTools(
+          toolsFromScript.filter((t) =>
+            t.instructions?.startsWith('#!knowledge')
+          )
+        );
+        // TODO: This is a hacky to figure out the knowledge id from instruction tool because it always follows knowledge retreieve --dataset-id ${id}
+        setKnowledgeIds(
+          toolsFromScript
+            .filter((t) => t.instructions?.startsWith('#!knowledge'))
+            .map((t) => t.instructions?.split(' ')[3]) as string[]
+        );
         setDynamicInstructions(
-          tools.find((t) => t.name === DYNAMIC_INSTRUCTIONS)?.instructions || ''
+          toolsFromScript.find((t) => t.name === DYNAMIC_INSTRUCTIONS)
+            ?.instructions || ''
         );
 
         const dependencies = texts.filter((t) =>
@@ -205,7 +274,7 @@ const EditContextProvider: React.FC<EditContextProps> = ({
         const existing = await getScript(scriptId.toString());
         const toUpdate: Script = {
           visibility: visibility,
-          content: await stringify([root, ...tools]),
+          content: await stringify([root, ...tools, ...knowledgeTools]),
           id: scriptId,
         };
         // Only update slug when displayName has changed
@@ -221,7 +290,7 @@ const EditContextProvider: React.FC<EditContextProps> = ({
         await updateScript(toUpdate).catch((error) => console.error(error));
       }
     }, DEBOUNCE_TIME);
-  }, [scriptId, root, tools, visibility]);
+  }, [scriptId, root, tools, visibility, knowledgeTools]);
 
   const newestToolName = useCallback(() => {
     let num = 1;
@@ -299,6 +368,8 @@ const EditContextProvider: React.FC<EditContextProps> = ({
         removeRootTool,
         newestToolName,
         createNewTool,
+        knowledgeIds,
+        setKnowledgeIds,
       }}
     >
       {children}

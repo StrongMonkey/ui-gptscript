@@ -1,4 +1,4 @@
-import { useCallback, useContext } from 'react';
+import { useCallback, useContext, useEffect, useState } from 'react';
 import RemoteImports from '@/components/edit/configure/imports';
 import Loading from '@/components/loading';
 import Models from '@/components/edit/configure/models';
@@ -16,10 +16,15 @@ import {
   Accordion,
   AccordionItem,
   Button,
+  Select,
+  SelectItem,
 } from '@nextui-org/react';
 import { PiToolboxBold } from 'react-icons/pi';
 import AssistantNotFound from '@/components/assistant-not-found';
 import { useRouter } from 'next/navigation';
+import { GiBrain } from 'react-icons/gi';
+import { KnowledgeBase } from '@/types/knowledge';
+import { listKnowledgeBases } from '@/actions/knowledge/knowledge';
 
 interface ConfigureProps {
   collapsed?: boolean;
@@ -40,7 +45,18 @@ const Configure: React.FC<ConfigureProps> = ({ collapsed }) => {
     setDynamicInstructions,
     dependencies,
     setDependencies,
+    knowledgeIds,
+    setKnowledgeIds,
   } = useContext(EditContext);
+
+  const [knowledgeOptions, setKnowledgeOptions] = useState<KnowledgeBase[]>([]);
+  useEffect(() => {
+    const getKnowledgeOptions = async () => {
+      const knowledges = await listKnowledgeBases();
+      setKnowledgeOptions(knowledges);
+    };
+    getKnowledgeOptions();
+  }, []);
 
   const abbreviate = (name: string) => {
     const words = name.split(/(?=[A-Z])|[\s_-]/);
@@ -158,10 +174,41 @@ const Configure: React.FC<ConfigureProps> = ({ collapsed }) => {
             classNames={{ content: collapsed ? 'pt-6 pb-10' : 'p-10 pt-6' }}
           >
             <RemoteImports
-              tools={root.tools}
+              tools={root.tools?.filter((t) => {
+                const isKnowledgeNotFound = !knowledgeOptions.find(
+                  (k) => k.name === t && !knowledgeIds.includes(k.id)
+                );
+                return !isKnowledgeNotFound;
+              })}
               setTools={setRootTools}
               collapsed={collapsed}
             />
+          </AccordionItem>
+          <AccordionItem
+            aria-label="knowledges"
+            title={<h1>Knowledges</h1>}
+            startContent={<GiBrain />}
+            classNames={{ content: collapsed ? 'pt-6 pb-10' : 'p-10 pt-6' }}
+          >
+            <Select
+              label="Knowledge select"
+              placeholder="Select a knowledge"
+              selectionMode="multiple"
+              className="w-full"
+              selectedKeys={knowledgeIds}
+              onChange={(value) => {
+                const ids = value.target.value.split(',');
+                setKnowledgeIds(
+                  knowledgeOptions
+                    .filter((k) => ids.includes(k.id))
+                    .map((k) => k.id)
+                );
+              }}
+            >
+              {knowledgeOptions.map((k) => (
+                <SelectItem key={k.id}>{k.name}</SelectItem>
+              ))}
+            </Select>
           </AccordionItem>
           <AccordionItem
             aria-label="advanced"

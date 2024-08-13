@@ -13,6 +13,10 @@ export const siteConfig = {
       href: '/build',
     },
     {
+      label: 'Knowledge',
+      href: '/knowledge',
+    },
+    {
       label: 'Explore',
       href: '/explore',
     },
